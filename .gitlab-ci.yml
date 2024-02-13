@@ -1,0 +1,19 @@
+image: google/cloud-sdk:alpine
+
+deploy_staging:
+  stage: deploy
+  environment: staging
+  only:
+    - main
+  script:
+    - echo $ARTIFACT_REPO
+    - echo $project_id
+    - cp $project_id  /tmp/service-acct.json #Used for auth. первая переменная в gitlab
+    - gcloud auth activate-service-account --key-file=/tmp/service-acct.json
+    - gcloud config set project $project_name #вторая переменная в gitlab
+    - gcloud builds submit  --config=cloudbuild.yaml --substitutions=_PROJECT_ID=$project_id,_ARTIFACT_REPO=$ARTIFACT_REPO,_ENV_IMG_NAME=$ENV_IMG_NAME,_ENV=$ENV,_SERVICE_NAME=$SERVICE_NAME . # строит имидж
+  variables:
+    ENV_IMG_NAME: "api" #название имиджа
+    ENV: "taxi-time-series" #name in artifact registry
+    ARTIFACT_REPO: "taxi-time-series" #name in artifact registry
+    SERVICE_NAME: "api" #так называется в клаудране
