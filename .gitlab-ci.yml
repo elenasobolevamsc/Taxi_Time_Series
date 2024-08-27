@@ -7,10 +7,10 @@ deploy_staging:
     - main
   script:
     - echo $ARTIFACT_REPO
-    - echo $project_id
-    - cp $project_name  /tmp/service-acct.json #Used for auth. первая переменная в gitlab
-    - gcloud auth activate-service-account --key-file=/tmp/service-acct.json
-    - gcloud config set project $project_id #вторая переменная в gitlab
+    - echo $project_id #команда печати в консоль для линукса
+    - cp $project_name  /tmp/service-acct.json #Used for auth. вторая переменная в gitlab #copy откуда-куда из файла окружения
+    - gcloud auth activate-service-account --key-file=/tmp/service-acct.json # чтобы скрипт мог работать с gcp , нужен ключ
+    - gcloud config set project $project_id #вторая переменная в gitlab задать проект
     - gcloud builds submit  --config=cloudbuild.yaml --substitutions=_PROJECT_ID=$project_id,_ARTIFACT_REPO=$ARTIFACT_REPO,_ENV_IMG_NAME=$ENV_IMG_NAME,_ENV=$ENV,_SERVICE_NAME=$SERVICE_NAME . # строит имидж
   variables:
     ENV_IMG_NAME: "api" #название имиджа
