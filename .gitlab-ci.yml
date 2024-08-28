@@ -1,19 +1,46 @@
-image: google/cloud-sdk:alpine
+stages:
+  - build
+  - deploy
 
-deploy_staging:
-  stage: deploy
-  environment: staging
-  only:
-    - main
+image: docker:20.10.16 # specifies the Docker image to be used for the build and deploy stages
+
+variables:
+  DOCKER_HOST: tcp://docker:2376 # specifies the Docker host's address for connecting to the Docker daemon
+  DOCKER_TLS_CERTDIR: "/certs" # directory where TLS certificates are stored for secure communication with the Docker daemon
+  DOCKER_TLS_VERIFY: 1 # enables TLS verification for secure Docker operations
+  DOCKER_CERT_PATH: "$DOCKER_TLS_CERTDIR/client" # path to the client TLS certificates
+  DOCKER_DRIVER: overlay2 # specifies the storage driver for Docker
+  API_VERSION: 0.1
+  GRADIO_VERSION: 0.1
+
+services:
+  - docker:20.10.16-dind # Docker-in-Docker (DinD) service image that allows running Docker commands inside a Docker container
+
+before_script:
+  - for try in {1..10}; do sleep 0.5; docker info && break ; done # attempts to connect to the Docker daemon up ensuring the Docker service is available before proceeding
+
+build:
+  stage: build
   script:
-    - echo $ARTIFACT_REPO
-    - echo $project_id #команда печати в консоль для линукса
-    - cp $project_name  /tmp/service-acct.json #Used for auth. вторая переменная в gitlab #copy откуда-куда из файла окружения
-    - gcloud auth activate-service-account --key-file=/tmp/service-acct.json # чтобы скрипт мог работать с gcp , нужен ключ
-    - gcloud config set project $project_id #вторая переменная в gitlab задать проект
-    - gcloud builds submit  --config=cloudbuild.yaml --substitutions=_PROJECT_ID=$project_id,_ARTIFACT_REPO=$ARTIFACT_REPO,_ENV_IMG_NAME=$ENV_IMG_NAME,_ENV=$ENV,_SERVICE_NAME=$SERVICE_NAME . # строит имидж
-  variables:
-    ENV_IMG_NAME: "api" #название имиджа
-    ENV: "taxi-time-series" #name in artifact registry
-    ARTIFACT_REPO: "taxi-time-series" #name in artifact registry
-    SERVICE_NAME: "api" #так называется в клаудране
+    - echo "${CI_REGISTRY_KEY}" | docker login ${CI_REGISTRY} -u json_key --password-stdin # logs into the Docker registry using credentials stored in the CI_REGISTRY_KEY
+    - >- # builds a Docker image from the Dockerfile located in the project directory, tagging it with the commit SHA for versioning
+      docker build
+      "${CI_API_PATH}"
+      --tag "${CI_REGISTRY}/${CI_API_PATH}:${API_VERSION}"
+    - docker push "${CI_REGISTRY}/${CI_API_PATH}:${API_VERSION}" # pushes the built Docker image to the specified registry, making it available for deployment
+    - >- # builds a Docker image from the Dockerfile located in the project directory, tagging it with the commit SHA for versioning
+      docker build
+      "${CI_GRADIO_PATH}"  
+      --tag "${CI_REGISTRY}/${CI_GRADIO_PATH}:${GRADIO_VERSION}"
+    - docker push "${CI_REGISTRY}/${CI_GRADIO_PATH}:${GRADIO_VERSION}" # pushes the built Docker image to the specified registry, making it available for deployment
+
+
+deploy:
+  image: bitnami/kubectl:latest # uses the latest Bitnami Kubectl image for interacting with Kubernetes
+  stage: deploy
+  script:
+    - kubectl config use-context elena_soboleva/taxi_time_series:taxi-time-series # sets the Kubernetes context to the specified project and agent
+    - cat k8s.yaml | sed -e "s,__VERSION_GRADIO__,${CI_REGISTRY}/${CI_GRADIO_PATH}:${GRADIO_VERSION}," | sed -e "s,__VERSION_API__,${CI_REGISTRY}/${CI_API_PATH}:${API_VERSION}," |kubectl apply -f - # reads the k8s.yaml file and replaces the __VERSION__ placeholder with the Docker image tag from the build stage, applies the Kubernetes configuration to deploy the app
+
+
+
